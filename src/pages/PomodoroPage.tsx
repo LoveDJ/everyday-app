@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { HiPlay, HiPause, HiRefresh, HiChevronRight } from 'react-icons/hi';
+import { HiPlay, HiPause, HiRefresh, HiChevronRight, HiVolumeUp, HiVolumeOff } from 'react-icons/hi';
 
 type Phase = 'focus' | 'rest';
 
@@ -13,8 +13,42 @@ export default function PomodoroPage() {
   const [editingSettings, setEditingSettings] = useState(false);
   const [tempFocus, setTempFocus] = useState('35');
   const [tempRest, setTempRest] = useState('10');
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 基于时间戳计时：记录计时结束的目标时间点
+  const endTimeRef = useRef<number>(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // 播放提示音（Web Audio API 生成和弦音效）
+  const playNotificationSound = useCallback(() => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      const now = ctx.currentTime;
+
+      // 播放三个递升音，模拟清脆铃声
+      const frequencies = [523.25, 659.25, 783.99]; // C5, E5, G5
+      frequencies.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, now + i * 0.2);
+        gain.gain.linearRampToValueAtTime(0.3, now + i * 0.2 + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.2 + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.2);
+        osc.stop(now + i * 0.2 + 0.5);
+      });
+    } catch {
+      // 静默失败
+    }
+  }, [soundEnabled]);
 
   const totalSeconds = phase === 'focus' ? focusMinutes * 60 : restMinutes * 60;
   const progress = ((totalSeconds - timeLeft) / totalSeconds) * 100;
@@ -31,48 +65,62 @@ export default function PomodoroPage() {
     setPhase(newPhase);
     setTimeLeft(newPhase === 'focus' ? focusMinutes * 60 : restMinutes * 60);
     setRunning(false);
+    endTimeRef.current = 0;
   }, [clearTimer, focusMinutes, restMinutes]);
 
-  const tick = useCallback(() => {
-    setTimeLeft((prev) => {
-      if (prev <= 1) {
-        clearTimer();
-        setRunning(false);
-        if (phase === 'focus') {
-          setCompletedPomodoros((c) => c + 1);
-          // 通知
-          if (Notification.permission === 'granted') {
-            new Notification('Everyday 番茄钟', { body: '专注时间结束，休息一下吧！' });
-          }
-          switchPhase('rest');
-        } else {
-          if (Notification.permission === 'granted') {
-            new Notification('Everyday 番茄钟', { body: '休息结束，开始新的专注！' });
-          }
-          switchPhase('focus');
-        }
-        return 0;
+  const handleTimerEnd = useCallback(() => {
+    clearTimer();
+    setRunning(false);
+    endTimeRef.current = 0;
+    playNotificationSound();
+    if (phase === 'focus') {
+      setCompletedPomodoros((c) => c + 1);
+      if (Notification.permission === 'granted') {
+        new Notification('Everyday 番茄钟', { body: '专注时间结束，休息一下吧！' });
       }
-      return prev - 1;
-    });
-  }, [clearTimer, phase, switchPhase]);
+      switchPhase('rest');
+    } else {
+      if (Notification.permission === 'granted') {
+        new Notification('Everyday 番茄钟', { body: '休息结束，开始新的专注！' });
+      }
+      switchPhase('focus');
+    }
+  }, [clearTimer, phase, switchPhase, playNotificationSound]);
+
+  const tick = useCallback(() => {
+    const now = Date.now();
+    const remaining = Math.round((endTimeRef.current - now) / 1000);
+    if (remaining <= 0) {
+      setTimeLeft(0);
+      handleTimerEnd();
+    } else {
+      setTimeLeft(remaining);
+    }
+  }, [handleTimerEnd]);
 
   const handleStart = () => {
     if (Notification.permission === 'default') {
       Notification.requestPermission();
     }
+    // 根据当前剩余时间计算目标结束时间点
+    endTimeRef.current = Date.now() + timeLeft * 1000;
     setRunning(true);
-    intervalRef.current = setInterval(tick, 1000);
+    intervalRef.current = setInterval(tick, 250); // 250ms 刷新，保证恢复后快速修正
   };
 
   const handlePause = () => {
     clearTimer();
     setRunning(false);
+    // 重新计算剩余时间，以便恢复时基于正确的时间继续
+    const remaining = Math.round((endTimeRef.current - Date.now()) / 1000);
+    setTimeLeft(Math.max(0, remaining));
+    endTimeRef.current = 0;
   };
 
   const handleReset = () => {
     clearTimer();
     setRunning(false);
+    endTimeRef.current = 0;
     setTimeLeft(phase === 'focus' ? focusMinutes * 60 : restMinutes * 60);
   };
 
@@ -209,16 +257,28 @@ export default function PomodoroPage() {
       <div className="w-full rounded-xl bg-white p-5 shadow-sm border border-gray-100 dark:bg-gray-800 dark:border-gray-700">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">时间设置</h3>
-          <button
-            onClick={() => {
-              setEditingSettings(!editingSettings);
-              setTempFocus(String(focusMinutes));
-              setTempRest(String(restMinutes));
-            }}
-            className="text-xs text-blue-500 hover:text-blue-600 transition"
-          >
-            {editingSettings ? '取消' : '修改'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="flex items-center gap-1 text-xs transition"
+              title={soundEnabled ? '关闭提示音' : '开启提示音'}
+            >
+              {soundEnabled
+                ? <><HiVolumeUp className="text-blue-500" /> <span className="text-blue-500">提示音开</span></>
+                : <><HiVolumeOff className="text-gray-400" /> <span className="text-gray-400">提示音关</span></>
+              }
+            </button>
+            <button
+              onClick={() => {
+                setEditingSettings(!editingSettings);
+                setTempFocus(String(focusMinutes));
+                setTempRest(String(restMinutes));
+              }}
+              className="text-xs text-blue-500 hover:text-blue-600 transition"
+            >
+              {editingSettings ? '取消' : '修改'}
+            </button>
+          </div>
         </div>
 
         {editingSettings ? (

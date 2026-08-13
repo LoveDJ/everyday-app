@@ -45,6 +45,14 @@
 - 自定义强调色
 - 数据导入/导出备份
 
+## 软件截图
+
+| | |
+|:---:|:---:|
+| ![今日打卡](pictures/423e63b8c590e1fcfc357581dbf9f601.png) | ![习惯管理](pictures/db17bb174a1bb8dd198be7721b6d4afa.png) |
+| ![打卡日历](pictures/2432482f8ba73b4d348bd930c90843e1.png) | ![成就统计](pictures/0aab67d58ad8d5ee9567274d0349b2e6.png) |
+| ![加班统计](pictures/27a18f58a402cef1af633dd00ce6b734.png) | ![番茄钟](pictures/c05739e262592dca00637c4c111c780f.png) |
+
 ## 技术栈
 
 | 层级 | 技术 |
