@@ -1,0 +1,14 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.everyday.app
+productName: Everyday
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - package.json
+win:
+  target: nsis
+  signAndEditExecutable: false
+electronVersion: 31.7.7
