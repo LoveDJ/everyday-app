@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
+import { v4 as uuid } from 'uuid';
+import { HiOutlineRefresh } from 'react-icons/hi';
 import { useAppStore } from '../store/useAppStore';
 import { toLocalDateStr } from '../utils/date';
+import type { Habit } from '../types';
 
 export default function CalendarPage() {
-  const { records, habits } = useAppStore();
+  const { records, habits, addRecord } = useAppStore();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   const dateStr = toLocalDateStr(selectedDate);
@@ -38,6 +41,33 @@ export default function CalendarPage() {
     .filter(Boolean);
 
   const today = toLocalDateStr(new Date());
+
+  // 判断习惯是否可以补卡
+  const canMakeup = (habit: Habit, dateStr: string): boolean => {
+    // 不允许补卡的习惯
+    if (!habit.allowMakeup) return false;
+    // 今天不需要补卡
+    if (dateStr === today) return false;
+    // 已经打卡过的不需要补卡
+    if (records.some((r) => r.habitId === habit.id && r.date === dateStr)) return false;
+    // 检查是否在允许补卡的天数范围内
+    const targetDate = new Date(dateStr);
+    const todayDate = new Date(today);
+    const diffDays = Math.floor((todayDate.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 1 && diffDays <= habit.makeupDays;
+  };
+
+  // 补卡操作
+  const handleMakeup = (habit: Habit, dateStr: string) => {
+    if (!canMakeup(habit, dateStr)) return;
+    addRecord({
+      id: uuid(),
+      habitId: habit.id,
+      date: dateStr,
+      completedAt: new Date().toISOString(),
+      note: '补卡',
+    });
+  };
 
   return (
     <div className="max-w-3xl">
@@ -92,13 +122,27 @@ export default function CalendarPage() {
               {(() => {
                 const completedIds = new Set(completedHabits.map((h) => h?.id));
                 const missing = enabledHabits.filter((h) => !completedIds.has(h.id));
-                return missing.map((habit) => (
-                  <div key={habit.id} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/50 opacity-50">
-                    <span className="text-base">{habit.icon}</span>
-                    <span className="text-sm text-gray-400 flex-1">{habit.name}</span>
-                    <span className="text-xs text-gray-400">—</span>
-                  </div>
-                ));
+                return missing.map((habit) => {
+                  const canDoMakeup = canMakeup(habit, dateStr);
+                  return (
+                    <div key={habit.id} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/50 opacity-50">
+                      <span className="text-base">{habit.icon}</span>
+                      <span className="text-sm text-gray-400 flex-1">{habit.name}</span>
+                      {canDoMakeup ? (
+                        <button
+                          onClick={() => handleMakeup(habit, dateStr)}
+                          className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-200 transition dark:bg-blue-900/40 dark:text-blue-400 dark:hover:bg-blue-900/60"
+                          title="补卡"
+                        >
+                          <HiOutlineRefresh size={12} />
+                          补卡
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
+                    </div>
+                  );
+                });
               })()}
             </div>
           )}

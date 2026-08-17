@@ -31,6 +31,7 @@ export interface OvertimeRecord {
   id: string;
   date: string;          // 加班日期 (YYYY-MM-DD)
   clockOutTime: string;  // 下班打卡时间 (HH:mm)
+  clockInTime?: string;  // 上班打卡时间 (HH:mm)，周末加班使用
   note: string;
 }
 

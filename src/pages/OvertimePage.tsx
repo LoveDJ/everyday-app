@@ -5,10 +5,27 @@ import { useAppStore } from '../store/useAppStore';
 import { toLocalDateStr } from '../utils/date';
 import type { OvertimeRecord } from '../types';
 
-const OVERTIME_START_MINS = 17 * 60 + 30; // 下午5点30分开始计算加班
+const OVERTIME_START_MINS = 17 * 60 + 30; // 下午5点30分开始计算加班（工作日）
+
+/** 判断是否为周末 */
+function isWeekend(dateStr: string): boolean {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
 
 /** 根据下班时间计算加班小时数 */
-function calcOvertimeHours(clockOutTime: string): number {
+function calcOvertimeHours(clockOutTime: string, clockInTime?: string, date?: string): number {
+  // 周末：从上班打卡到下班打卡全部算加班
+  if (date && isWeekend(date) && clockInTime) {
+    const [inH, inM] = clockInTime.split(':').map(Number);
+    const [outH, outM] = clockOutTime.split(':').map(Number);
+    const inMins = inH * 60 + inM;
+    const outMins = outH * 60 + outM;
+    if (outMins <= inMins) return 0;
+    return Math.round(((outMins - inMins) / 60) * 10) / 10;
+  }
+  // 工作日：17:30 之后算加班
   const [h, m] = clockOutTime.split(':').map(Number);
   const totalMins = h * 60 + m;
   if (totalMins <= OVERTIME_START_MINS) return 0;
@@ -35,7 +52,11 @@ export default function OvertimePage() {
 
   const [formDate, setFormDate] = useState(yesterday);
   const [formTime, setFormTime] = useState('19:00');
+  const [formClockIn, setFormClockIn] = useState('09:00');
   const [formNote, setFormNote] = useState('');
+
+  // 判断表单日期是否为周末
+  const formDateIsWeekend = useMemo(() => isWeekend(formDate), [formDate]);
 
   // 当前选中的月份 (YYYY-MM)
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -45,7 +66,7 @@ export default function OvertimePage() {
 
   const handleAdd = () => {
     if (!formDate || !formTime) return;
-    const hours = calcOvertimeHours(formTime);
+    const hours = calcOvertimeHours(formTime, formDateIsWeekend ? formClockIn : undefined, formDate);
     if (hours <= 0) return;
 
     const record: OvertimeRecord = {
@@ -54,6 +75,10 @@ export default function OvertimePage() {
       clockOutTime: formTime,
       note: formNote,
     };
+    // 周末记录上班时间
+    if (formDateIsWeekend) {
+      record.clockInTime = formClockIn;
+    }
     addOvertimeRecord(record);
     setFormNote('');
     // 添加后日期保持昨天
@@ -71,11 +96,11 @@ export default function OvertimePage() {
 
   // 月统计
   const monthStats = useMemo(() => {
-    const totalHours = monthRecords.reduce((sum, r) => sum + calcOvertimeHours(r.clockOutTime), 0);
+    const totalHours = monthRecords.reduce((sum, r) => sum + calcOvertimeHours(r.clockOutTime, r.clockInTime, r.date), 0);
     const days = monthRecords.length;
     const avgHours = days > 0 ? totalHours / days : 0;
     const maxHours = monthRecords.length > 0
-      ? Math.max(...monthRecords.map((r) => calcOvertimeHours(r.clockOutTime)))
+      ? Math.max(...monthRecords.map((r) => calcOvertimeHours(r.clockOutTime, r.clockInTime, r.date)))
       : 0;
     return {
       totalHours: Math.round(totalHours * 10) / 10,
@@ -109,6 +134,9 @@ export default function OvertimePage() {
           {yesterdayRecorded && (
             <span className="ml-2 text-xs text-green-500 font-normal">（昨天已记录）</span>
           )}
+          {formDateIsWeekend && (
+            <span className="ml-2 text-xs text-orange-500 font-normal">（周末加班）</span>
+          )}
         </h2>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
@@ -121,6 +149,18 @@ export default function OvertimePage() {
               className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 dark:bg-gray-700 dark:border-gray-600 dark:text-white cursor-pointer"
             />
           </div>
+          {formDateIsWeekend && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500 dark:text-gray-400">上班时间</label>
+              <input
+                type="time"
+                value={formClockIn}
+                onChange={(e) => setFormClockIn(e.target.value)}
+                onClick={(e) => (e.target as HTMLInputElement).showPicker()}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-400 dark:bg-gray-700 dark:border-gray-600 dark:text-white cursor-pointer"
+              />
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 dark:text-gray-400">下班时间</label>
             <input
@@ -143,7 +183,7 @@ export default function OvertimePage() {
           </div>
           <button
             onClick={handleAdd}
-            disabled={!formDate || !formTime || calcOvertimeHours(formTime) <= 0}
+            disabled={!formDate || !formTime || calcOvertimeHours(formTime, formDateIsWeekend ? formClockIn : undefined, formDate) <= 0}
             className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <HiOutlinePlus size={16} />
@@ -151,10 +191,13 @@ export default function OvertimePage() {
           </button>
         </div>
         <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-          加班从 17:30 开始计算，下班时间早于 17:30 不计加班
-          {formTime && calcOvertimeHours(formTime) > 0 && (
+          {formDateIsWeekend
+            ? '周末加班：从上班到下班全部时长计入加班'
+            : '工作日：加班从 17:30 开始计算，下班时间早于 17:30 不计加班'
+          }
+          {formTime && calcOvertimeHours(formTime, formDateIsWeekend ? formClockIn : undefined, formDate) > 0 && (
             <span className="ml-2 text-blue-500">
-              当前加班时长：{formatHours(calcOvertimeHours(formTime))}
+              当前加班时长：{formatHours(calcOvertimeHours(formTime, formDateIsWeekend ? formClockIn : undefined, formDate))}
             </span>
           )}
         </p>
@@ -222,17 +265,28 @@ export default function OvertimePage() {
         ) : (
           <div className="flex flex-col gap-2">
             {monthRecords.map((r) => {
-              const hours = calcOvertimeHours(r.clockOutTime);
+              const hours = calcOvertimeHours(r.clockOutTime, r.clockInTime, r.date);
+              const isWeekendRecord = isWeekend(r.date);
               return (
                 <div
                   key={r.id}
                   className="flex items-center gap-3 rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-700/50 group"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
                         {r.date}
                       </span>
+                      {isWeekendRecord && (
+                        <span className="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full dark:bg-purple-900/40 dark:text-purple-400">
+                          周末
+                        </span>
+                      )}
+                      {r.clockInTime && (
+                        <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full dark:bg-green-900/40 dark:text-green-400">
+                          {r.clockInTime} 上班
+                        </span>
+                      )}
                       <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full dark:bg-blue-900/40 dark:text-blue-400">
                         {r.clockOutTime} 下班
                       </span>
